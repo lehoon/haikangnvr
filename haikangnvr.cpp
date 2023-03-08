@@ -188,6 +188,7 @@ int main(int argc, char* argv[])
 				CONSOLE_COLOR_ERROR();
 				std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
 				SPDLOG_ERROR("海康设备登录失败,请检查IP地址、用户名密码是否正确.");
+				CONSOLE_COLOR_RESET();
 				return -1;
 			}
 
@@ -211,6 +212,7 @@ int main(int argc, char* argv[])
 				CONSOLE_COLOR_ERROR();
 				std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
 				SPDLOG_ERROR("海康设备登录失败,请检查IP地址、用户名密码是否正确.");
+				CONSOLE_COLOR_RESET();
 				return -1;
 			}
 
@@ -234,6 +236,7 @@ int main(int argc, char* argv[])
 				CONSOLE_COLOR_ERROR();
 				std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
 				SPDLOG_ERROR("海康设备登录失败,请检查IP地址、用户名密码是否正确.");
+				CONSOLE_COLOR_RESET();
 				return -1;
 			}
 
