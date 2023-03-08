@@ -24,6 +24,9 @@ public:
 
 	//打印接收到的帧信息
 	static void PrinterFrameInfo(const char *, unsigned int, FRAME_INFO*);
+
+	//打印视频流拉取成功消息
+	static void PrinterPullStreamSuccess(unsigned int channel_no);
 };
 
 #endif HAIKANG_NVR_TESTING_STRUCT_PRINTER_H_

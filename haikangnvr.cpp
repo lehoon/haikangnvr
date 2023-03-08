@@ -6,6 +6,7 @@
 #include "Configure.h"
 #include "Device.h"
 #include "Helper.h"
+#include "util.h"
 
 #include "client/crash_report_database.h"
 #include "client/settings.h"
@@ -114,10 +115,13 @@ int main(int argc, char* argv[])
 		<< std::endl
 		<< std::endl;
 
+	SPDLOG_INFO("接入视频设备地址: {}, {}, {}, {}", device_host, device_port, device_username, device_password);
+
 	if (bDeviceInfoPrint) {
 		DeviceInfoHK::Ptr deviceInfoPtr(new DeviceInfoHK);
 		connectInfo connectInfo(device_host, device_port, device_username, device_password, 10, false);
 		deviceInfoPtr->connectDevice(connectInfo, [&](bool success, const connectResult& result) {});
+		SPDLOG_INFO("打印设备信息完成.");
 		CONSOLE_COLOR_RESET();
 		return 0;
 	}
@@ -143,7 +147,7 @@ int main(int argc, char* argv[])
 		<< std::endl
 		<< "	解码间隔:"
 		<< frame_count
-		<<"帧"
+		<< "帧"
 		<< std::endl
 		<< "	是否转码:"
 		<< Helper::decode_name(device_decode)
@@ -156,6 +160,21 @@ int main(int argc, char* argv[])
 		<< std::endl
 		<< std::endl;
 
+	toolkit::AppendString append_string;
+	append_string << "接入视频数:"
+		<< device_count
+		<< "路,解码间隔:"
+		<< frame_count
+		<< "帧,是否转码:"
+		<< Helper::decode_name(device_decode)
+		<< ",是否生成mat对象:"
+		<< Helper::decode_name(device_mat)
+		<< ",是否打印视频流数据:"
+		<< Helper::logger_open(device_logger_open);
+
+	SPDLOG_INFO("测试参数:{}", append_string);
+	SPDLOG_INFO("接入视频设备地址: {}, {}, {}, {}", device_host, device_port, device_username, device_password);
+
 	long device_play_success = 0;
 	long time_begin = clock();
 
@@ -165,23 +184,12 @@ int main(int argc, char* argv[])
 
 		if (device_decode && device_mat) {
 			DecodeToMatDeviceHK::Ptr devicePtr(new DecodeToMatDeviceHK(device_count));
-			devicePtr->connectDevice(connectInfo, [&](bool success, const connectResult& result) {
-				if (!success) {
-					CONSOLE_COLOR_ERROR();
-					std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
-					return;
-				}
-
-				CONSOLE_COLOR_INFO();
-				std::cout << "登录返回结果:" << Helper::login_message(success)
-					<< ",设备序列号:"
-					<< result.strDevName
-					<< ",通道起始编号:"
-					<< result.ui16ChnStart
-					<< ",通道数:"
-					<< result.ui16ChnCount
-					<< std::endl;
-				});
+			if (!devicePtr->connectDevice(connectInfo, nullptr)) {
+				CONSOLE_COLOR_ERROR();
+				std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
+				SPDLOG_ERROR("海康设备登录失败,请检查IP地址、用户名密码是否正确.");
+				return -1;
+			}
 
 			//设置退出信号处理函数
 			static toolkit::semaphore sem;
@@ -190,29 +198,21 @@ int main(int argc, char* argv[])
 				sem.post();
 				});// 设置退出信号
 
-			sem.wait();
 			//获取成功接入视频路数
 			device_play_success = devicePtr->channelCount();
+			std::cout << "海康设备视频流接入测试,本次登陆设备成功数:" << 1 << ",接入实时视频流通道数:" << device_play_success << std::endl;
+			CONSOLE_COLOR_DEBUG();
+			std::cout << std::endl << "测试中,请稍后,使用CTRL+C停止测试程序" << std::endl;
+			sem.wait();
 		}
 		else if (device_decode) {
 			DecodeDeviceHK::Ptr devicePtr(new DecodeDeviceHK(device_count));
-			devicePtr->connectDevice(connectInfo, [&](bool success, const connectResult& result) {
-				if (!success) {
-					CONSOLE_COLOR_ERROR();
-					std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
-					return;
-				}
-
-				CONSOLE_COLOR_INFO();
-				std::cout << "登录返回结果:" << Helper::login_message(success)
-					<< ",设备序列号:"
-					<< result.strDevName
-					<< ",通道起始编号:"
-					<< result.ui16ChnStart
-					<< ",通道数:"
-					<< result.ui16ChnCount
-					<< std::endl;
-				});
+			if (!devicePtr->connectDevice(connectInfo, nullptr)) {
+				CONSOLE_COLOR_ERROR();
+				std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
+				SPDLOG_ERROR("海康设备登录失败,请检查IP地址、用户名密码是否正确.");
+				return -1;
+			}
 
 			//设置退出信号处理函数
 			static toolkit::semaphore sem;
@@ -221,29 +221,21 @@ int main(int argc, char* argv[])
 				sem.post();
 				});// 设置退出信号
 
-			sem.wait();
 			//获取成功接入视频路数
 			device_play_success = devicePtr->channelCount();
+			std::cout << "海康设备视频流接入测试,本次登陆设备成功数:" << 1 << ",接入实时视频流通道数:" << device_play_success << std::endl;
+			CONSOLE_COLOR_DEBUG();
+			std::cout << std::endl << "测试中,请稍后,使用CTRL+C停止测试程序" << std::endl;
+			sem.wait();
 		}
 		else {
 			DeviceHK::Ptr devicePtr(new DeviceHK(device_count));
-			devicePtr->connectDevice(connectInfo, [&](bool success, const connectResult& result) {
-				if (!success) {
-					CONSOLE_COLOR_ERROR();
-					std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
-					return;
-				}
-
-				CONSOLE_COLOR_INFO();
-				std::cout << "登录返回结果:" << Helper::login_message(success)
-					<< ",设备序列号:"
-					<< result.strDevName
-					<< ",通道起始编号:"
-					<< result.ui16ChnStart
-					<< ",通道数:"
-					<< result.ui16ChnCount
-					<< std::endl;
-				});
+			if (!devicePtr->connectDevice(connectInfo, nullptr)) {
+				CONSOLE_COLOR_ERROR();
+				std::cout << "海康设备登录失败,请检查IP地址、用户名密码是否正确." << std::endl;
+				SPDLOG_ERROR("海康设备登录失败,请检查IP地址、用户名密码是否正确.");
+				return -1;
+			}
 
 			//设置退出信号处理函数
 			static toolkit::semaphore sem;
@@ -252,18 +244,18 @@ int main(int argc, char* argv[])
 				sem.post();
 				});// 设置退出信号
 
-			sem.wait();
 			//获取成功接入视频路数
 			device_play_success = devicePtr->channelCount();
+			std::cout << "海康设备视频流接入测试,本次登陆设备成功数:" << 1 << ",接入实时视频流通道数:" << device_play_success << std::endl;
+			CONSOLE_COLOR_DEBUG();
+			std::cout << std::endl << "测试中,请稍后,使用CTRL+C停止测试程序" << std::endl;
+			sem.wait();
 		}
-
-		//获取测试统计信息    帧数  字节数  测试时间
 	}
-
 	long time_end = clock();
 	CONSOLE_COLOR_YELLOW();
 	std::cout << "接收到ctrl+c退出信号,程序准备退出" << std::endl;
-	spdlog::info("接收到ctrl+c退出信号,程序准备退出");
+	SPDLOG_INFO("接收到ctrl+c退出信号,程序准备退出");
 	Sleep(3000);
 
 	CONSOLE_COLOR_INFO();
@@ -271,7 +263,7 @@ int main(int argc, char* argv[])
 	std::cout << "海康设备视频流接入测试完成,本次登陆设备成功数:" << 1 << ",接入实时视频流通道数:" << device_play_success << std::endl;
 
 	long time_sub_second = (time_end - time_begin) / CLOCKS_PER_SEC;
-	spdlog::info("本次测试时间:{}秒", time_sub_second);
+	SPDLOG_INFO("本次测试时间:{}秒", time_sub_second);
 	std::cout << "本次测试时间:" << time_sub_second << "秒" << std::endl;
 
 	CONSOLE_COLOR_RESET();

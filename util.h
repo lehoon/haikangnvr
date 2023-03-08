@@ -31,14 +31,12 @@ class_name &class_name::Instance() { \
 }
 
 namespace toolkit {
-
-#define StrPrinter ::toolkit::_StrPrinter()
-	class _StrPrinter : public std::string {
+	class AppendString : public std::string {
 	public:
-		_StrPrinter() {}
+		AppendString() {}
 
 		template<typename T>
-		_StrPrinter& operator <<(T&& data) {
+		AppendString& operator <<(T&& data) {
 			_stream << std::forward<T>(data);
 			this->std::string::operator=(_stream.str());
 			return *this;
@@ -51,6 +49,7 @@ namespace toolkit {
 	private:
 		std::stringstream _stream;
 	};
+
 
 	//禁止拷贝基类
 	class noncopyable {

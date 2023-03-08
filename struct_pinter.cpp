@@ -1,6 +1,7 @@
 #include "struct_pinter.h"
 #include "Logger.h"
 #include "haikang_model.h"
+#include "util.h"
 
 
 static std::string login_mode(int mode) {
@@ -26,7 +27,7 @@ static std::string protocol_name(int protocol) {
 }
 
 static std::string is_online(int state) {
-	return state == 0 ? "在线" : "离线";
+	return state == 0 ? "离线" : "在线";
 }
 
 static std::string is_lock_support(int state) {
@@ -36,6 +37,7 @@ static std::string is_lock_support(int state) {
 //打印net_dvr_deviceinfo_v30
 void CStructDumpPrinter::PrinterDeviceInfoV30(NET_DVR_DEVICEINFO_V30* v30) {
 	CONSOLE_COLOR_YELLOW();
+
 	std::cout
 		<< "设备信息:" << std::endl
 		<< "	设备型号: " << HaikangDeviceModel::ModelName((int)v30->wDevType)
@@ -85,6 +87,8 @@ void CStructDumpPrinter::PrinterDeviceInfoV30(NET_DVR_DEVICEINFO_V30* v30) {
 		<< "	音频输入通道数:" << (int)v30->byVoiceInChanNum
 		<< std::endl
 		<< "	音频输入起始通道号: " << (int)v30->byStartVoiceInChanNo
+		<< std::endl
+		<< std::endl
 		<< std::endl;
 }
 
@@ -107,21 +111,22 @@ void CStructDumpPrinter::PrinterDeviceInfoV40(NET_DVR_DEVICEINFO_V40* v40) {
 				<< "	剩余可尝试登陆的次数:" << (int) v40->byRetryLoginTime;
 		}
 
-		std::cout << std::endl << std::endl << std::endl;
+	std::cout << std::endl << std::endl << std::endl;
 }
 
 //打印ip通道配置信息
 void CStructDumpPrinter::PrinterIpDeviceInfoV31(unsigned int idx, NET_DVR_IPDEVINFO_V31* v31) {
-	CONSOLE_COLOR_INFO();
-	std::cout
-		<< "	通道编号: " << idx
-		<< ",是否在线:" << is_online((int) v31->byEnable)
-		<< ",协议类型: " << protocol_name((int)v31->byProType)
-		<< ",IP地址: " << v31->struIP.sIpV4
-		<< ",端口号: " << v31->wDVRPort
-		<< ",用户名: " << v31->sUserName
-		<< ",密码: " << v31->sPassword
-		<< std::endl;
+	CONSOLE_COLOR_YELLOW();
+	toolkit::AppendString appendString;
+	appendString
+		<< "通道编号: " << idx
+		<< ", 是否在线:" << is_online((int) v31->byEnable)
+		<< ", 协议类型: " << protocol_name((int)v31->byProType)
+		<< ", IP地址: " << v31->struIP.sIpV4
+		<< ", 端口号: " << v31->wDVRPort
+		<< ", 用户名: " << v31->sUserName
+		<< ", 密码: " << v31->sPassword;
+	std::cout << appendString << std::endl;
 }
 
 // devName      设备名称
@@ -129,6 +134,7 @@ void CStructDumpPrinter::PrinterIpDeviceInfoV31(unsigned int idx, NET_DVR_IPDEVI
 // pFrameInfo   帧数据
 void CStructDumpPrinter::PrinterFrameInfo(const char* devName, unsigned int channel, FRAME_INFO* pFrameInfo) {
 	CONSOLE_COLOR_DEBUG();
+
 	std::cout << "接收到推送的视频流帧数据,"
 		<< ", 设备名称:"
 		<< devName
@@ -147,6 +153,15 @@ void CStructDumpPrinter::PrinterFrameInfo(const char* devName, unsigned int chan
 		<< ", 帧号:"
 		<< pFrameInfo->dwFrameNum
 		<< std::endl
+		<< std::endl
 		<< std::endl;
 }
 
+void CStructDumpPrinter::PrinterPullStreamSuccess(unsigned int channel_no) {
+	CONSOLE_COLOR_INFO();
+	std::string message;
+	message.append("视频通道[");
+	message.append(std::to_string(channel_no));
+	message.append("]拉取视频流成功！");
+	std::cout << message << std::endl;
+}

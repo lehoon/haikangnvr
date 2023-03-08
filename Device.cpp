@@ -42,61 +42,32 @@ DeviceHK::~DeviceHK() {
         });
 }
 
-void DeviceHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
+bool DeviceHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
     NET_DVR_USER_LOGIN_INFO loginInfo = { 0 };
     NET_DVR_DEVICEINFO_V40 loginResult = { 0 };
 
     //login info
     loginInfo.wPort = info.ui16DevPort;
     loginInfo.byUseTransport = 0;
-    loginInfo.bUseAsynLogin = 1;
+    loginInfo.bUseAsynLogin = 0;
     strcpy(loginInfo.sDeviceAddress, info.strDevIp.c_str());
     strcpy(loginInfo.sUserName, info.strUserName.c_str());
     strcpy(loginInfo.sPassword, info.strPwd.c_str());
     uintFrameCount = info.ui16FrameCount;
     bPrintFrameLog = info.bPrintFrameLog;
 
-    //callback info
-    typedef std::function< void(LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo)> hkLoginCB;
-
-    std::weak_ptr<Device> weakSelf = shared_from_this();
-    loginInfo.pUser = new hkLoginCB([weakSelf, cb](LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo) {
-        //std::cout << "海康设备登录成功=" << lUserID << ", dwResult=" << dwResult << std::endl;
-        SPDLOG_INFO("海康设备连接成功, userid={}, dwResult={}", lUserID, dwResult);
-        connectResult result;
-        if (dwResult == TRUE) {
-            result.strDevName = (char*)(lpDeviceInfo->sSerialNumber);
-            result.ui16ChnStart = lpDeviceInfo->byStartChan;
-            result.ui16ChnCount = lpDeviceInfo->byChanNum;
-            auto _strongSelf = weakSelf.lock();
-            if (_strongSelf) {
-                std::cout << "开始注册视频通道" << std::endl;
-                auto strongSelf = std::dynamic_pointer_cast<DeviceHK>(_strongSelf);
-                strongSelf->onConnected(lUserID, lpDeviceInfo);
-            }
-            else {
-                std::cout << "获取引用对象失败,退出程序" << std::endl;
-            }
-        }
-        else {
-            CONSOLE_COLOR_ERROR();
-            DWORD errcode = NET_DVR_GetLastError();
-            std::cout << "海康设备本次链接失败:错误码:" << errcode << ",错误信息:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-            SPDLOG_ERROR("海康设备本次链接失败, errcode={},mesage={}", errcode, NET_DVR_GetErrorMsg((LONG*)&errcode));
-        }
-        cb(dwResult == TRUE, result);
-        });
-    loginInfo.cbLoginResult = [](LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo, void* pUser) {
-        auto* fun = static_cast<hkLoginCB*>(pUser);
-        (*fun)(lUserID, dwResult, lpDeviceInfo);
-        delete fun;
-    };
     NET_DVR_SetConnectTime(iTimeOut * 1000, 3);
-    if (NET_DVR_Login_V40(&loginInfo, &loginResult) < 0) {
+    m_i64LoginId = NET_DVR_Login_V40(&loginInfo, &loginResult);
+
+    if (m_i64LoginId < 0) {
         DWORD _error_code = NET_DVR_GetLastError();
         std::cout << "登录设备失败" << NET_DVR_GetErrorMsg((LONG*)&_error_code) << std::endl;
         SPDLOG_ERROR("海康设备登录设备失败, errcode={}, message={}", _error_code, NET_DVR_GetErrorMsg((LONG*)&_error_code));
+        return false;
     }
+
+    this->onConnected(m_i64LoginId, &loginResult.struDeviceV30);
+    return true;
 }
 
 void DeviceHK::disconnect(const relustCB& cb) {
@@ -106,6 +77,8 @@ void DeviceHK::disconnect(const relustCB& cb) {
         m_i64LoginId = -1;
         Device::onDisconnected(true);
     }
+
+    cb(true);
 }
 
 void DeviceHK::addChannel(int iChn, bool bMainStream) {
@@ -114,6 +87,7 @@ void DeviceHK::addChannel(int iChn, bool bMainStream) {
         m_mapChannels[iChn] = channel;
         IncrSuccessChannel();
         std::cout << "接入模拟视频通道" << iChn << "成功" << std::endl;
+        SPDLOG_INFO("接入模拟视频通道{}成功", iChn);
     }
     catch (std::runtime_error e) {
         SPDLOG_ERROR("接入模拟视频通道{}错误,{}", iChn, e.what());
@@ -129,12 +103,14 @@ void DeviceHK::addIpChannel(int iChn, bool bMainStream) {
         DevChannel::Ptr channel(new DevIpChannelHK(m_i64LoginId, (char*)m_deviceInfo.sSerialNumber, iChn, bMainStream, uintFrameCount));
         m_mapChannels[iChn] = channel;
         IncrSuccessChannel();
+        CONSOLE_COLOR_YELLOW();
         std::cout << "接入IP视频通道" << iChn << "成功" << std::endl;
+        SPDLOG_INFO("接入IP视频通道{}成功", iChn);
     }
     catch (std::runtime_error e) {
         SPDLOG_ERROR("接入IP视频通道{}错误,{}", iChn, e.what());
         CONSOLE_COLOR_ERROR();
-        std::cout << "接入IP视频通道错误" << e.what() << std::endl;
+        std::cout << "接入IP视频通道错误," << e.what() << std::endl;
         CONSOLE_COLOR_RESET();
     }
 }
@@ -146,54 +122,72 @@ void DeviceHK::delChannel(int chn) {
 void DeviceHK::onConnected(LONG lUserID, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo) {
     m_i64LoginId = lUserID;
     m_deviceInfo = *lpDeviceInfo;
-    std::cout << "开始注册视频通道" << std::endl;
+    std::cout << "开始拉取视频流" << std::endl;
+    SPDLOG_INFO("开始拉取视频流");
+    CStructDumpPrinter::PrinterDeviceInfoV30(lpDeviceInfo);
+
     // 需要判断是否是nvr设备  如果是nvr设备的话 需要去获取配置的ip通道信息
     if (lpDeviceInfo->byIPChanNum == 0) {
-        CStructDumpPrinter::PrinterDeviceInfoV30(lpDeviceInfo);
-
         //不支持ip通道 不是nvr设备
+        CONSOLE_COLOR_DEBUG();
         std::cout << std::endl << "该设备不是nvr设备,不支持ip通道,添加模拟通道" << std::endl;
+        SPDLOG_INFO("该设备不是nvr设备,不支持ip通道,添加模拟通道");
         addAllChannel(true);  //添加默认的模拟通道信息
         return;
     }
     else {
+        CONSOLE_COLOR_DEBUG();
         std::cout << "该设备是nvr设备,支持ip通道,添加ip通道" << std::endl;
+        SPDLOG_INFO("该设备是nvr设备,支持ip通道,添加ip通道");
     }
 
     //ip通道数>0说明是nvr设备  需要通过调用函数NET_DVR_GetDVRConfig 配合 NET_DVR_GET_IPPARACFG_V40 查询ip通道参数
+    CONSOLE_COLOR_INFO();
+    SPDLOG_INFO("开始使用NET_DVR_GetDVRConfig查询nvr参数信息");
     std::cout << "开始使用NET_DVR_GetDVRConfig查询nvr参数信息" << m_i64LoginId << std::endl;
     NET_DVR_IPPARACFG_V40 dvrIpParamCfgV40 = { 0 };
     memset(&dvrIpParamCfgV40, 0, sizeof(NET_DVR_IPPARACFG_V40));
 
     DWORD dwReturned = 0;
+    CONSOLE_COLOR_YELLOW(); 
     BOOL result = NET_DVR_GetDVRConfig(m_i64LoginId, NET_DVR_GET_IPPARACFG_V40, 0, &dvrIpParamCfgV40, sizeof(NET_DVR_IPPARACFG_V40), &dwReturned);
     std::cout << "获取nvr设备的通道配置信息," << result << ", " << dwReturned << std::endl;
+    SPDLOG_INFO("获取nvr设备的通道配置信息{},{}", result, dwReturned);
 
     if (!result) {
         CONSOLE_COLOR_ERROR();
         std::cout << std::endl << "不支持IP通道或者操作失败." << std::endl;
+        CONSOLE_COLOR_RESET();
+        SPDLOG_ERROR("不支持IP通道或者操作失败{},{}", result, dwReturned);
         return;
     }
 
     CONSOLE_COLOR_INFO();
-    std::cout << std::endl << "检测到nvr设备,开始查询注册到nvr的视频设备" << std::endl;
-    std::cout << "注册到该nvr的视频通道数量," << dvrIpParamCfgV40.dwDChanNum << std::endl;
+    std::cout << std::endl << "检测到nvr设备,开始查询注册到nvr的视频设备" << std::endl << std::endl;
+    std::cout << std::endl << "注册到该nvr的视频通道数量," << dvrIpParamCfgV40.dwDChanNum << std::endl << std::endl;
+    SPDLOG_INFO("检测到nvr设备,开始查询注册到nvr的视频设备,视频通道数量{}", dvrIpParamCfgV40.dwDChanNum);
+
     //数字通道
     unsigned int channel_count = 0;
     for (unsigned int i = 0; i < dvrIpParamCfgV40.dwDChanNum; i++)
     {
-        CStructDumpPrinter::PrinterIpDeviceInfoV31(i + 1, &(dvrIpParamCfgV40.struIPDevInfo[i]));
+        unsigned channel_no = dvrIpParamCfgV40.dwStartDChan + i;
         if (dvrIpParamCfgV40.struIPDevInfo[i].byEnable)  //ip通道在线
         {
-            if (channel_count++ > uintChannel) {
+            if (uintSuccessChannel >= uintChannel) {
                 break;
             }
-            unsigned channel_no = dvrIpParamCfgV40.dwStartDChan + i;
+
+            CONSOLE_COLOR_YELLOW();
+            std::cout << std::endl << std::endl << "该通道"<< channel_no << "设备目前在线,开始接入设备视频流数据" << std::endl;
+            CONSOLE_COLOR_INFO();
+            CStructDumpPrinter::PrinterIpDeviceInfoV31(channel_no, &(dvrIpParamCfgV40.struIPDevInfo[i]));
             addIpChannel(channel_no, true);
-            std::cout << "该设备目前在线,开始接入设备视频流数据" << std::endl;
+            SPDLOG_INFO("该设备{}目前在线,开始接入设备视频流数据", channel_no);
         }
         else {
             std::cout << "该设备目前不在线" << std::endl;
+            SPDLOG_ERROR("该设备{}目前不在线,开始接入设备视频流数据", channel_no);
         }
     }
 
@@ -203,7 +197,7 @@ void DeviceHK::onConnected(LONG lUserID, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo) 
 void DeviceHK::addAllChannel(bool bMainStream) {
     SPDLOG_INFO("开始拉取模拟通道数据, 通道数:{} 实际通道数:{}", uintChannel, m_deviceInfo.byChanNum);
     for (int i = 0; i < m_deviceInfo.byChanNum; i++) {
-        if (i >= uintChannel) {
+        if (uintSuccessChannel >= uintChannel) {
             break;
         }
 
@@ -250,58 +244,32 @@ DecodeDeviceHK::~DecodeDeviceHK() {
         });
 }
 
-void DecodeDeviceHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
+bool DecodeDeviceHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
     NET_DVR_USER_LOGIN_INFO loginInfo = { 0 };
     NET_DVR_DEVICEINFO_V40 loginResult = { 0 };
 
     //login info
     loginInfo.wPort = info.ui16DevPort;
     loginInfo.byUseTransport = 0;
-    loginInfo.bUseAsynLogin = 1;
+    loginInfo.bUseAsynLogin = 0;
     strcpy(loginInfo.sDeviceAddress, info.strDevIp.c_str());
     strcpy(loginInfo.sUserName, info.strUserName.c_str());
     strcpy(loginInfo.sPassword, info.strPwd.c_str());
     uintFrameCount = info.ui16FrameCount;
     bPrintFrameLog = info.bPrintFrameLog;
 
-    //callback info
-    typedef std::function< void(LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo)> hkLoginCB;
-
-    std::weak_ptr<Device> weakSelf = shared_from_this();
-    loginInfo.pUser = new hkLoginCB([weakSelf, cb](LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo) {
-        //TraceL<<lUserID<<" "<<dwResult<<" "<<lpDeviceInfo->sSerialNumber;
-        //std::cout << "海康设备登录成功=" << lUserID << ", dwResult=" << dwResult << std::endl;
-        SPDLOG_INFO("海康设备连接成功, userid={}, dwResult={}", lUserID, dwResult);
-        connectResult result;
-        if (dwResult == TRUE) {
-            result.strDevName = (char*)(lpDeviceInfo->sSerialNumber);
-            result.ui16ChnStart = lpDeviceInfo->byStartChan;
-            result.ui16ChnCount = lpDeviceInfo->byChanNum;
-            auto _strongSelf = weakSelf.lock();
-            if (_strongSelf) {
-                auto strongSelf = std::dynamic_pointer_cast<DecodeDeviceHK>(_strongSelf);
-                strongSelf->onConnected(lUserID, lpDeviceInfo);
-            }
-        }
-        else {
-            CONSOLE_COLOR_ERROR();
-            DWORD errcode = NET_DVR_GetLastError();
-            std::cout << "海康设备本次链接失败:错误码:" << errcode << ",错误信息:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-            SPDLOG_ERROR("海康设备本次链接失败, errcode={},mesage={}", errcode, NET_DVR_GetErrorMsg((LONG*)&errcode));
-        }
-        cb(dwResult == TRUE, result);
-        });
-    loginInfo.cbLoginResult = [](LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo, void* pUser) {
-        auto* fun = static_cast<hkLoginCB*>(pUser);
-        (*fun)(lUserID, dwResult, lpDeviceInfo);
-        delete fun;
-    };
     NET_DVR_SetConnectTime(iTimeOut * 1000, 3);
-    if (NET_DVR_Login_V40(&loginInfo, &loginResult) < 0) {
+    m_i64LoginId = NET_DVR_Login_V40(&loginInfo, &loginResult);
+
+    if (m_i64LoginId < 0) {
         DWORD _error_code = NET_DVR_GetLastError();
         std::cout << "登录设备失败" << NET_DVR_GetErrorMsg((LONG*)&_error_code) << std::endl;
         SPDLOG_ERROR("海康设备登录设备失败, errcode={}, message={}", _error_code, NET_DVR_GetErrorMsg((LONG*)&_error_code));
+        return false;
     }
+
+    this->onConnected(m_i64LoginId, &loginResult.struDeviceV30);
+    return true;
 }
 
 void DecodeDeviceHK::disconnect(const relustCB& cb) {
@@ -318,6 +286,7 @@ void DecodeDeviceHK::addChannel(int iChn, bool bMainStream) {
         DevChannel::Ptr channel(new DevDecodeChannelHK(m_i64LoginId, (char*)m_deviceInfo.sSerialNumber, iChn, bMainStream, uintFrameCount, bPrintFrameLog));
         m_mapChannels[iChn] = channel;
         IncrSuccessChannel();
+        CONSOLE_COLOR_YELLOW();
         std::cout << "接入模拟解码视频通道" << iChn << "成功" << std::endl;
     }
     catch (std::runtime_error e) {
@@ -333,6 +302,7 @@ void DecodeDeviceHK::addIpChannel(int iChn, bool bMainStream) {
         DevChannel::Ptr channel(new DevIpDecodeChannelHK(m_i64LoginId, (char*)m_deviceInfo.sSerialNumber, iChn, bMainStream, uintFrameCount, bPrintFrameLog));
         m_mapChannels[iChn] = channel;
         IncrSuccessChannel();
+        CONSOLE_COLOR_YELLOW();
         std::cout << "接入IP解码视频通道" << iChn << "成功" << std::endl;
     }
     catch (std::runtime_error e) {
@@ -351,45 +321,70 @@ void DecodeDeviceHK::onConnected(LONG lUserID, LPNET_DVR_DEVICEINFO_V30 lpDevice
     m_i64LoginId = lUserID;
     m_deviceInfo = *lpDeviceInfo;
 
+    std::cout << "开始注册解码视频通道" << std::endl;
+    SPDLOG_INFO("开始注册解码视频通道");
+    CStructDumpPrinter::PrinterDeviceInfoV30(lpDeviceInfo);
+
     // 需要判断是否是nvr设备  如果是nvr设备的话 需要去获取配置的ip通道信息
     if (lpDeviceInfo->byIPChanNum == 0) {
-        CStructDumpPrinter::PrinterDeviceInfoV30(lpDeviceInfo);
         //不支持ip通道 不是nvr设备
         std::cout << std::endl << "该设备不是nvr设备,不支持ip通道,添加模拟通道" << std::endl;
+        SPDLOG_INFO("该设备不是nvr设备,不支持ip通道,添加模拟通道");
         addAllChannel(true);  //添加默认的模拟通道信息
         return;
     }
+    else {
+        CONSOLE_COLOR_DEBUG();
+        std::cout << "该设备是nvr设备,支持ip通道,添加ip通道" << std::endl;
+        SPDLOG_INFO("该设备是nvr设备,支持ip通道,添加ip通道");
+    }
 
     //ip通道数>0说明是nvr设备  需要通过调用函数NET_DVR_GetDVRConfig 配合 NET_DVR_GET_IPPARACFG_V40 查询ip通道参数
+    CONSOLE_COLOR_INFO();
+    SPDLOG_INFO("开始使用NET_DVR_GetDVRConfig查询nvr参数信息");
+    std::cout << "开始使用NET_DVR_GetDVRConfig查询nvr参数信息" << m_i64LoginId << std::endl;
     NET_DVR_IPPARACFG_V40 dvrIpParamCfgV40 = { 0 };
+    memset(&dvrIpParamCfgV40, 0, sizeof(NET_DVR_IPPARACFG_V40));
+
     DWORD dwReturned = 0;
+    CONSOLE_COLOR_YELLOW();
     BOOL result = NET_DVR_GetDVRConfig(m_i64LoginId, NET_DVR_GET_IPPARACFG_V40, 0, &dvrIpParamCfgV40, sizeof(NET_DVR_IPPARACFG_V40), &dwReturned);
+    std::cout << "获取nvr设备的通道配置信息," << result << ", " << dwReturned << std::endl;
+    SPDLOG_INFO("获取nvr设备的通道配置信息{},{}", result, dwReturned);
 
     if (!result) {
         CONSOLE_COLOR_ERROR();
         std::cout << std::endl << "不支持IP通道或者操作失败." << std::endl;
+        CONSOLE_COLOR_RESET();
+        SPDLOG_ERROR("不支持IP通道或者操作失败{},{}", result, dwReturned);
         return;
     }
 
     CONSOLE_COLOR_INFO();
     std::cout << std::endl << "检测到nvr设备,开始查询注册到nvr的视频设备" << std::endl;
-    std::cout << "注册到该nvr的视频通道数量," << dvrIpParamCfgV40.dwDChanNum << std::endl;
+    std::cout << std::endl << "注册到该nvr的视频通道数量," << dvrIpParamCfgV40.dwDChanNum << std::endl;
+    SPDLOG_INFO("检测到nvr设备,开始查询注册到nvr的视频设备,视频通道数量{}", dvrIpParamCfgV40.dwDChanNum);
+
     //数字通道
-    unsigned int channel_count = 0;
     for (unsigned int i = 0; i < dvrIpParamCfgV40.dwDChanNum; i++)
     {
-        CStructDumpPrinter::PrinterIpDeviceInfoV31(i + 1, &(dvrIpParamCfgV40.struIPDevInfo[i]));
+        unsigned channel_no = dvrIpParamCfgV40.dwStartDChan + i;
         if (dvrIpParamCfgV40.struIPDevInfo[i].byEnable)  //ip通道在线
         {
-            if (channel_count++ > uintChannel) {
+            if (uintSuccessChannel >= uintChannel) {
                 break;
             }
-            unsigned channel_no = dvrIpParamCfgV40.dwStartDChan + i;
+
+            CONSOLE_COLOR_YELLOW();
+            std::cout << std::endl << std::endl << "该通道" << channel_no << "设备目前在线,开始接入设备视频流数据" << std::endl;
+            CONSOLE_COLOR_INFO();
+            CStructDumpPrinter::PrinterIpDeviceInfoV31(channel_no, &(dvrIpParamCfgV40.struIPDevInfo[i]));
             addIpChannel(channel_no, true);
-            std::cout << "该设备目前在线,开始接入设备视频流数据" << std::endl;
+            SPDLOG_INFO("该设备{}目前在线,开始接入设备视频流数据", channel_no);
         }
         else {
             std::cout << "该设备目前不在线" << std::endl;
+            SPDLOG_ERROR("该设备{}目前不在线,开始接入设备视频流数据", channel_no);
         }
     }
 
@@ -399,7 +394,7 @@ void DecodeDeviceHK::onConnected(LONG lUserID, LPNET_DVR_DEVICEINFO_V30 lpDevice
 void DecodeDeviceHK::addAllChannel(bool bMainStream) {
     SPDLOG_INFO("开始拉取模拟通道数据, 通道数:{} 实际通道数:{}", uintChannel, m_deviceInfo.byChanNum);
     for (int i = 0; i < m_deviceInfo.byChanNum; i++) {
-        if (i >= uintChannel) break;
+        if (uintSuccessChannel >= uintChannel) break;
         addChannel(m_deviceInfo.byStartChan + i, bMainStream);
     }
 }
@@ -443,57 +438,32 @@ DecodeToMatDeviceHK::~DecodeToMatDeviceHK() {
         });
 }
 
-void DecodeToMatDeviceHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
+bool DecodeToMatDeviceHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
     NET_DVR_USER_LOGIN_INFO loginInfo = { 0 };
     NET_DVR_DEVICEINFO_V40 loginResult = { 0 };
 
     //login info
     loginInfo.wPort = info.ui16DevPort;
     loginInfo.byUseTransport = 0;
-    loginInfo.bUseAsynLogin = 1;
+    loginInfo.bUseAsynLogin = 0;
     strcpy(loginInfo.sDeviceAddress, info.strDevIp.c_str());
     strcpy(loginInfo.sUserName, info.strUserName.c_str());
     strcpy(loginInfo.sPassword, info.strPwd.c_str());
     uintFrameCount = info.ui16FrameCount;
     bPrintFrameLog = info.bPrintFrameLog;
 
-    //callback info
-    typedef std::function< void(LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo)> hkLoginCB;
-
-    std::weak_ptr<Device> weakSelf = shared_from_this();
-    loginInfo.pUser = new hkLoginCB([weakSelf, cb](LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo) {
-        //std::cout << "海康设备登录成功=" << lUserID << ", dwResult=" << dwResult << std::endl;
-        SPDLOG_INFO("海康设备连接成功, userid={}, dwResult={}", lUserID, dwResult);
-        connectResult result;
-        if (dwResult == TRUE) {
-            result.strDevName = (char*)(lpDeviceInfo->sSerialNumber);
-            result.ui16ChnStart = lpDeviceInfo->byStartChan;
-            result.ui16ChnCount = lpDeviceInfo->byChanNum;
-            auto _strongSelf = weakSelf.lock();
-            if (_strongSelf) {
-                auto strongSelf = std::dynamic_pointer_cast<DecodeToMatDeviceHK>(_strongSelf);
-                strongSelf->onConnected(lUserID, lpDeviceInfo);
-            }
-        }
-        else {
-            CONSOLE_COLOR_ERROR();
-            DWORD errcode = NET_DVR_GetLastError();
-            std::cout << "海康设备本次链接失败:错误码:" << errcode << ",错误信息:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-            SPDLOG_ERROR("海康设备本次链接失败, errcode={},mesage={}", errcode, NET_DVR_GetErrorMsg((LONG*)&errcode));
-        }
-        cb(dwResult == TRUE, result);
-        });
-    loginInfo.cbLoginResult = [](LONG lUserID, DWORD dwResult, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo, void* pUser) {
-        auto* fun = static_cast<hkLoginCB*>(pUser);
-        (*fun)(lUserID, dwResult, lpDeviceInfo);
-        delete fun;
-    };
     NET_DVR_SetConnectTime(iTimeOut * 1000, 3);
-    if (NET_DVR_Login_V40(&loginInfo, &loginResult) < 0) {
+    m_i64LoginId = NET_DVR_Login_V40(&loginInfo, &loginResult);
+
+    if (m_i64LoginId < 0) {
         DWORD _error_code = NET_DVR_GetLastError();
         std::cout << "登录设备失败" << NET_DVR_GetErrorMsg((LONG*)&_error_code) << std::endl;
         SPDLOG_ERROR("海康设备登录设备失败, errcode={}, message={}", _error_code, NET_DVR_GetErrorMsg((LONG*)&_error_code));
+        return false;
     }
+
+    this->onConnected(m_i64LoginId, &loginResult.struDeviceV30);
+    return true;
 }
 
 void DecodeToMatDeviceHK::disconnect(const relustCB& cb) {
@@ -510,7 +480,9 @@ void DecodeToMatDeviceHK::addChannel(int iChn, bool bMainStream) {
         DevChannel::Ptr channel(new DevDecodeToMatChannelHK(m_i64LoginId, (char*)m_deviceInfo.sSerialNumber, iChn, bMainStream, uintFrameCount, bPrintFrameLog));
         m_mapChannels[iChn] = channel;
         IncrSuccessChannel();
+        CONSOLE_COLOR_YELLOW();
         std::cout << "接入模拟解码转mat视频通道" << iChn << "成功" << std::endl;
+        SPDLOG_INFO("接入模拟视频通道{}成功", iChn);
     }
     catch (std::runtime_error e) {
         SPDLOG_ERROR("接入模拟解码转mat视频通道{}错误,{}", iChn, e.what());
@@ -526,7 +498,9 @@ void DecodeToMatDeviceHK::addIpChannel(int iChn, bool bMainStream) {
         m_mapChannels[iChn] = channel;
 
         IncrSuccessChannel();
+        CONSOLE_COLOR_YELLOW();
         std::cout << "接入ip解码转mat视频通道" << iChn << "成功" << std::endl;
+        SPDLOG_INFO("接入IP视频通道{}成功", iChn);
     }
     catch (std::runtime_error e) {
         SPDLOG_ERROR("接入ip解码转mat视频通道{}错误,{}", iChn, e.what());
@@ -543,46 +517,71 @@ void DecodeToMatDeviceHK::delChannel(int chn) {
 void DecodeToMatDeviceHK::onConnected(LONG lUserID, LPNET_DVR_DEVICEINFO_V30 lpDeviceInfo) {
     m_i64LoginId = lUserID;
     m_deviceInfo = *lpDeviceInfo;
+    std::cout << "开始拉取视频流" << std::endl;
+    SPDLOG_INFO("开始拉取视频流");
+    CStructDumpPrinter::PrinterDeviceInfoV30(lpDeviceInfo);
 
     // 需要判断是否是nvr设备  如果是nvr设备的话 需要去获取配置的ip通道信息
     if (lpDeviceInfo->byIPChanNum == 0) {
-        CStructDumpPrinter::PrinterDeviceInfoV30(lpDeviceInfo);
         //不支持ip通道 不是nvr设备
         std::cout << std::endl << "该设备不是nvr设备,不支持ip通道,添加模拟通道" << std::endl;
+        SPDLOG_INFO("该设备不是nvr设备,不支持ip通道,添加模拟通道");
         addAllChannel(true);  //添加默认的模拟通道信息
         return;
     }
+    else {
+        CONSOLE_COLOR_DEBUG();
+        std::cout << "该设备是nvr设备,支持ip通道,添加ip通道" << std::endl;
+        SPDLOG_INFO("该设备是nvr设备,支持ip通道,添加ip通道");
+    }
 
     //ip通道数>0说明是nvr设备  需要通过调用函数NET_DVR_GetDVRConfig 配合 NET_DVR_GET_IPPARACFG_V40 查询ip通道参数
+    CONSOLE_COLOR_INFO();
+    SPDLOG_INFO("开始使用NET_DVR_GetDVRConfig查询nvr参数信息");
+    std::cout << "开始使用NET_DVR_GetDVRConfig查询nvr参数信息" << m_i64LoginId << std::endl;
     NET_DVR_IPPARACFG_V40 dvrIpParamCfgV40 = { 0 };
+    memset(&dvrIpParamCfgV40, 0, sizeof(NET_DVR_IPPARACFG_V40));
+
     DWORD dwReturned = 0;
+    CONSOLE_COLOR_YELLOW();
     BOOL result = NET_DVR_GetDVRConfig(m_i64LoginId, NET_DVR_GET_IPPARACFG_V40, 0, &dvrIpParamCfgV40, sizeof(NET_DVR_IPPARACFG_V40), &dwReturned);
+    std::cout << "获取nvr设备的通道配置信息," << result << ", " << dwReturned << std::endl;
+    SPDLOG_INFO("获取nvr设备的通道配置信息{},{}", result, dwReturned);
+
 
     if (!result) {
         CONSOLE_COLOR_ERROR();
         std::cout << std::endl << "不支持IP通道或者操作失败." << std::endl;
+        CONSOLE_COLOR_RESET();
+        SPDLOG_ERROR("不支持IP通道或者操作失败{},{}", result, dwReturned);
         return;
     }
 
     CONSOLE_COLOR_INFO();
     std::cout << std::endl << "检测到nvr设备,开始查询注册到nvr的视频设备" << std::endl;
-    std::cout << "注册到该nvr的视频通道数量," << dvrIpParamCfgV40.dwDChanNum << std::endl;
+    std::cout << std::endl << "注册到该nvr的视频通道数量," << dvrIpParamCfgV40.dwDChanNum << std::endl;
+    SPDLOG_INFO("检测到nvr设备,开始查询注册到nvr的视频设备,视频通道数量{}", dvrIpParamCfgV40.dwDChanNum);
+
     //数字通道
-    unsigned int channel_count = 0;
     for (unsigned int i = 0; i < dvrIpParamCfgV40.dwDChanNum; i++)
     {
-        CStructDumpPrinter::PrinterIpDeviceInfoV31(i + 1, &(dvrIpParamCfgV40.struIPDevInfo[i]));
+        unsigned channel_no = dvrIpParamCfgV40.dwStartDChan + i;
         if (dvrIpParamCfgV40.struIPDevInfo[i].byEnable)  //ip通道在线
         {
-            if (channel_count++ > uintChannel) {
+            if (uintSuccessChannel >= uintChannel) {
                 break;
             }
-            unsigned channel_no = dvrIpParamCfgV40.dwStartDChan + i;
+
+            CONSOLE_COLOR_YELLOW();
+            std::cout << std::endl << std::endl << "该通道" << channel_no << "设备目前在线,开始接入设备视频流数据" << std::endl;
+            CONSOLE_COLOR_INFO();
+            CStructDumpPrinter::PrinterIpDeviceInfoV31(channel_no, &(dvrIpParamCfgV40.struIPDevInfo[i]));
             addIpChannel(channel_no, true);
-            std::cout << "该设备目前在线,开始接入设备视频流数据" << std::endl;
+            SPDLOG_INFO("该设备{}目前在线,开始接入设备视频流数据", channel_no);
         }
         else {
             std::cout << "该设备目前不在线" << std::endl;
+            SPDLOG_ERROR("该设备{}目前不在线,开始接入设备视频流数据", channel_no);
         }
     }
 
@@ -592,7 +591,7 @@ void DecodeToMatDeviceHK::onConnected(LONG lUserID, LPNET_DVR_DEVICEINFO_V30 lpD
 void DecodeToMatDeviceHK::addAllChannel(bool bMainStream) {
     SPDLOG_INFO("开始拉取模拟通道数据, 通道数:{} 实际通道数:{}", uintChannel, m_deviceInfo.byChanNum);
     for (int i = 0; i < m_deviceInfo.byChanNum; i++) {
-        if (i >= uintChannel) break;
+        if (uintSuccessChannel >= uintChannel) break;
         addChannel(m_deviceInfo.byStartChan + i, bMainStream);
     }
 }
@@ -680,6 +679,7 @@ DevChannelHK::DevChannelHK(int64_t i64LoginId, const char* pcDevName, int iChn, 
 }
 
 DevChannelHK::~DevChannelHK() {
+    CONSOLE_COLOR_INFO();
     std::cout << "退出模拟视频仅接入模式测试,通道号:" << m_channel;
     if (m_i64PreviewHandle >= 0) {
         NET_DVR_StopRealPlay((LONG)m_i64PreviewHandle);
@@ -699,6 +699,7 @@ void DevChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize) {
         if (!PlayM4_GetPort((long *) &m_iPlayHandle)) {  //获取播放库未使用的通道号
             CONSOLE_COLOR_ERROR();
             DWORD errcode = NET_DVR_GetLastError();
+            SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
             std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
             break;
         }
@@ -706,6 +707,7 @@ void DevChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize) {
             if (!PlayM4_SetStreamOpenMode(m_iPlayHandle, STREAME_REALTIME)) { //设置实时流播放模式
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -713,6 +715,7 @@ void DevChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize) {
                 1024 * 1024)) {  //打开流接口
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -728,19 +731,13 @@ void DevChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize) {
             if (!PlayM4_Play(m_iPlayHandle, 0)) {  //播放开始
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
 
-            CONSOLE_COLOR_INFO();
-            std::cout << "视频通道[" << m_channel << "]拉取视频流成功！" << std::endl;
-            //打开音频解码, 需要码流是复合流
-            if (!PlayM4_PlaySoundShare(m_iPlayHandle)) {
-                CONSOLE_COLOR_ERROR();
-                DWORD errcode = NET_DVR_GetLastError();
-                std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-                break;
-            }
+            CStructDumpPrinter::PrinterPullStreamSuccess(m_channel);
+            SPDLOG_INFO("模拟视频通道[{}]拉取视频成功", m_channel);
         }
     }
         break;
@@ -749,6 +746,7 @@ void DevChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize) {
             if (!PlayM4_InputData(m_iPlayHandle, pBuffer, dwBufSize)) {
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -812,6 +810,7 @@ DevDecodeChannelHK::DevDecodeChannelHK(int64_t i64LoginId, const char* pcDevName
 }
 
 DevDecodeChannelHK::~DevDecodeChannelHK() {
+    CONSOLE_COLOR_INFO();
     std::cout << "退出模拟视频仅解码模式测试,通道号:" << m_channel;
     if (m_i64PreviewHandle >= 0) {
         NET_DVR_StopRealPlay((LONG)m_i64PreviewHandle);
@@ -831,6 +830,7 @@ void DevDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufS
         if (!PlayM4_GetPort((long*)&m_iPlayHandle)) {  //获取播放库未使用的通道号
             CONSOLE_COLOR_ERROR();
             DWORD errcode = NET_DVR_GetLastError();
+            SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
             std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
             break;
         }
@@ -838,6 +838,7 @@ void DevDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufS
             if (!PlayM4_SetStreamOpenMode(m_iPlayHandle, STREAME_REALTIME)) { //设置实时流播放模式
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -845,6 +846,7 @@ void DevDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufS
                 1024 * 1024)) {  //打开流接口
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -860,19 +862,12 @@ void DevDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufS
             if (!PlayM4_Play(m_iPlayHandle, 0)) {  //播放开始
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
             
-            CONSOLE_COLOR_INFO();
-            std::cout <<"视频通道[" << m_channel << "]拉取视频流成功！" << std::endl;
-            //打开音频解码, 需要码流是复合流
-            if (!PlayM4_PlaySoundShare(m_iPlayHandle)) {
-                CONSOLE_COLOR_ERROR();
-                DWORD errcode = NET_DVR_GetLastError();
-                std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-                break;
-            }
+            CStructDumpPrinter::PrinterPullStreamSuccess(m_channel);
         }
     }
         break;
@@ -881,6 +876,7 @@ void DevDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufS
             if (!PlayM4_InputData(m_iPlayHandle, pBuffer, dwBufSize)) {
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -952,6 +948,7 @@ DevDecodeToMatChannelHK::DevDecodeToMatChannelHK(int64_t i64LoginId, const char*
 }
 
 DevDecodeToMatChannelHK::~DevDecodeToMatChannelHK() {
+    CONSOLE_COLOR_INFO();
     std::cout << "退出模拟视频解码转mat模式测试,通道号:" << m_channel;
     if (m_i64PreviewHandle >= 0) {
         NET_DVR_StopRealPlay((LONG)m_i64PreviewHandle);
@@ -971,6 +968,7 @@ void DevDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD d
         if (!PlayM4_GetPort((long*)&m_iPlayHandle)) {  //获取播放库未使用的通道号
             CONSOLE_COLOR_ERROR();
             DWORD errcode = NET_DVR_GetLastError();
+            SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
             std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
             break;
         }
@@ -978,6 +976,7 @@ void DevDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD d
             if (!PlayM4_SetStreamOpenMode(m_iPlayHandle, STREAME_REALTIME)) { //设置实时流播放模式
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -985,6 +984,7 @@ void DevDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD d
                 1024 * 1024)) {  //打开流接口
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -1000,19 +1000,12 @@ void DevDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD d
             if (!PlayM4_Play(m_iPlayHandle, 0)) {  //播放开始
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
 
-            CONSOLE_COLOR_INFO();
-            std::cout << "视频通道[" << m_channel << "]拉取视频流成功！" << std::endl;
-            //打开音频解码, 需要码流是复合流
-            if (!PlayM4_PlaySoundShare(m_iPlayHandle)) {
-                CONSOLE_COLOR_ERROR();
-                DWORD errcode = NET_DVR_GetLastError();
-                std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-                break;
-            }
+            CStructDumpPrinter::PrinterPullStreamSuccess(m_channel);
         }
     }
         break;
@@ -1021,6 +1014,7 @@ void DevDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD d
             if (!PlayM4_InputData(m_iPlayHandle, pBuffer, dwBufSize)) {
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
@@ -1101,6 +1095,7 @@ DevIpChannelHK::DevIpChannelHK(int64_t i64LoginId, const char* pcDevName, int iC
 }
 
 DevIpChannelHK::~DevIpChannelHK() {
+    CONSOLE_COLOR_INFO();
     std::cout << "退出Ip视频通道仅接入模式测试,通道号:" << m_channel;
     if (m_i64PreviewHandle >= 0) {
         NET_DVR_StopRealPlay((LONG)m_i64PreviewHandle);
@@ -1120,21 +1115,27 @@ void DevIpChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize)
         if (!PlayM4_GetPort((long*)&m_iPlayHandle)) {  //获取播放库未使用的通道号
             CONSOLE_COLOR_ERROR();
             DWORD errcode = NET_DVR_GetLastError();
+            SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
             std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+            CONSOLE_COLOR_RESET();
             break;
         }
         if (dwBufSize > 0) {
             if (!PlayM4_SetStreamOpenMode(m_iPlayHandle, STREAME_REALTIME)) { //设置实时流播放模式
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
             if (!PlayM4_OpenStream(m_iPlayHandle, pBuffer, dwBufSize,
                 1024 * 1024)) {  //打开流接口
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
 
@@ -1149,19 +1150,13 @@ void DevIpChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize)
             if (!PlayM4_Play(m_iPlayHandle, 0)) {  //播放开始
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
 
-            CONSOLE_COLOR_INFO();
-            std::cout << "视频通道[" << m_channel << "]拉取视频流成功！" << std::endl;
-            //打开音频解码, 需要码流是复合流
-            if (!PlayM4_PlaySoundShare(m_iPlayHandle)) {
-                CONSOLE_COLOR_ERROR();
-                DWORD errcode = NET_DVR_GetLastError();
-                std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-                break;
-            }
+            CStructDumpPrinter::PrinterPullStreamSuccess(m_channel);
         }
     }
         break;
@@ -1170,7 +1165,9 @@ void DevIpChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize)
             if (!PlayM4_InputData(m_iPlayHandle, pBuffer, dwBufSize)) {
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
         }
@@ -1240,6 +1237,7 @@ DevIpDecodeChannelHK::DevIpDecodeChannelHK(int64_t i64LoginId, const char* pcDev
 }
 
 DevIpDecodeChannelHK::~DevIpDecodeChannelHK() {
+    CONSOLE_COLOR_INFO();
     std::cout << "退出Ip视频通道转码模式测试,通道号:" << m_channel;
     if (m_i64PreviewHandle >= 0) {
         NET_DVR_StopRealPlay((LONG)m_i64PreviewHandle);
@@ -1259,14 +1257,18 @@ void DevIpDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBu
         if (!PlayM4_GetPort((long*)&m_iPlayHandle)) {  //获取播放库未使用的通道号
             CONSOLE_COLOR_ERROR();
             DWORD errcode = NET_DVR_GetLastError();
+            SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
             std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+            CONSOLE_COLOR_RESET();
             break;
         }
         if (dwBufSize > 0) {
             if (!PlayM4_SetStreamOpenMode(m_iPlayHandle, STREAME_REALTIME)) { //设置实时流播放模式
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
             if (!PlayM4_OpenStream(m_iPlayHandle, pBuffer, dwBufSize,
@@ -1274,6 +1276,7 @@ void DevIpDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBu
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
 
@@ -1288,18 +1291,12 @@ void DevIpDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBu
             if (!PlayM4_Play(m_iPlayHandle, 0)) {  //播放开始
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
-            CONSOLE_COLOR_INFO();
-            std::cout << "视频通道[" << m_channel << "]拉取视频流成功！" << std::endl;
-            //打开音频解码, 需要码流是复合流
-            if (!PlayM4_PlaySoundShare(m_iPlayHandle)) {
-                CONSOLE_COLOR_ERROR();
-                DWORD errcode = NET_DVR_GetLastError();
-                std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-                break;
-            }
+            CStructDumpPrinter::PrinterPullStreamSuccess(m_channel);
         }
     }
                         break;
@@ -1308,20 +1305,22 @@ void DevIpDecodeChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBu
             if (!PlayM4_InputData(m_iPlayHandle, pBuffer, dwBufSize)) {
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
         }
     }
-                           break;
+        break;
     case NET_DVR_AUDIOSTREAMDATA: {
         //音频数据
     }
-                                break;
+        break;
     case NET_DVR_PRIVATE_DATA: {
         //私有数据,包括智能信息
     }
-                             break;
+        break;
     default:
         break;
     }
@@ -1387,6 +1386,7 @@ DevIpDecodeToMatChannelHK::DevIpDecodeToMatChannelHK(int64_t i64LoginId, const c
 }
 
 DevIpDecodeToMatChannelHK::~DevIpDecodeToMatChannelHK() {
+    CONSOLE_COLOR_INFO();
     std::cout << "退出Ip视频通道转码并转mat模式测试,通道号:" << m_channel;
     if (m_i64PreviewHandle >= 0) {
         NET_DVR_StopRealPlay((LONG)m_i64PreviewHandle);
@@ -1406,21 +1406,27 @@ void DevIpDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD
         if (!PlayM4_GetPort((long*)&m_iPlayHandle)) {  //获取播放库未使用的通道号
             CONSOLE_COLOR_ERROR();
             DWORD errcode = NET_DVR_GetLastError();
+            SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
             std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+            CONSOLE_COLOR_RESET();
             break;
         }
         if (dwBufSize > 0) {
             if (!PlayM4_SetStreamOpenMode(m_iPlayHandle, STREAME_REALTIME)) { //设置实时流播放模式
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
             if (!PlayM4_OpenStream(m_iPlayHandle, pBuffer, dwBufSize,
                 1024 * 1024)) {  //打开流接口
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
 
@@ -1435,40 +1441,36 @@ void DevIpDecodeToMatChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD
             if (!PlayM4_Play(m_iPlayHandle, 0)) {  //播放开始
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
-            CONSOLE_COLOR_INFO();
-            std::cout << "视频通道[" << m_channel << "]拉取视频流成功！" << std::endl;
-            //打开音频解码, 需要码流是复合流
-            if (!PlayM4_PlaySoundShare(m_iPlayHandle)) {
-                CONSOLE_COLOR_ERROR();
-                DWORD errcode = NET_DVR_GetLastError();
-                std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
-                break;
-            }
+            CStructDumpPrinter::PrinterPullStreamSuccess(m_channel);
         }
     }
-                        break;
+        break;
     case NET_DVR_STREAMDATA: { //流数据（包括复合流或音视频分开的视频流数据）
         if (dwBufSize > 0 && m_iPlayHandle != -1) {
             if (!PlayM4_InputData(m_iPlayHandle, pBuffer, dwBufSize)) {
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
+                SPDLOG_ERROR("ip视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
                 std::cout << "ip视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
+                CONSOLE_COLOR_RESET();
                 break;
             }
         }
     }
-                           break;
+        break;
     case NET_DVR_AUDIOSTREAMDATA: {
         //音频数据
     }
-                                break;
+        break;
     case NET_DVR_PRIVATE_DATA: {
         //私有数据,包括智能信息
     }
-                             break;
+        break;
     default:
         break;
     }
@@ -1517,7 +1519,7 @@ DeviceInfoHK::~DeviceInfoHK() {
         });
 }
 
-void DeviceInfoHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
+bool DeviceInfoHK::connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut) {
     NET_DVR_USER_LOGIN_INFO loginInfo = { 0 };
     NET_DVR_DEVICEINFO_V40 loginResult = { 0 };
     connectResult connect_result;
@@ -1535,7 +1537,7 @@ void DeviceInfoHK::connectDevice(const connectInfo& info, const connectCB& cb, i
         DWORD _error_code = NET_DVR_GetLastError();
         std::cout << "登录设备失败" << NET_DVR_GetErrorMsg((LONG*)&_error_code) << std::endl;
         SPDLOG_ERROR("海康设备登录设备失败, errcode={}, message={}", _error_code, NET_DVR_GetErrorMsg((LONG*)&_error_code));
-        return;
+        return false;
     }
 
     std::cout << "登录设备成功,开始查询设备信息" << std::endl << std::endl;
@@ -1548,7 +1550,7 @@ void DeviceInfoHK::connectDevice(const connectInfo& info, const connectCB& cb, i
     if (v30.byIPChanNum == 0) {
         CONSOLE_COLOR_INFO();
         std::cout << std::endl << std::endl << "该设备视频通道数量:" << (int)v30.byChanNum << std::endl << std::endl;
-        return;
+        return false;
     }
 
     //ip通道数>0说明是nvr设备  需要通过调用函数NET_DVR_GetDVRConfig 配合 NET_DVR_GET_IPPARACFG_V40 查询ip通道参数
@@ -1559,7 +1561,7 @@ void DeviceInfoHK::connectDevice(const connectInfo& info, const connectCB& cb, i
     if (!result) {
         CONSOLE_COLOR_ERROR();
         std::cout << "不支持IP通道或者操作失败." << std::endl;
-        return;
+        return false;
     }
 
     CONSOLE_COLOR_INFO();
@@ -1580,6 +1582,7 @@ void DeviceInfoHK::connectDevice(const connectInfo& info, const connectCB& cb, i
     connect_result.ui16ChnStart = v30.byStartChan;
     connect_result.ui16ChnCount = v30.byChanNum;
     cb(true, connect_result);
+    return true;
 }
 
 void DeviceInfoHK::disconnect(const relustCB& cb) {

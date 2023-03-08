@@ -25,6 +25,26 @@ public:
         bPrintFrameLog = _bPrintFrameLog;
     }
 
+public:
+    std::string toString() {
+        std::string out;
+        out.append("connectInfo:{");
+        out.append(strDevIp);
+        out.append(",");
+        out.append(std::to_string(ui16DevPort));
+        out.append(",");        
+        out.append(strUserName);
+        out.append(",");
+        out.append(strPwd);
+        out.append(",");
+        out.append(std::to_string(ui16FrameCount));
+        out.append(",");
+        out.append(std::to_string(bPrintFrameLog));
+        out.append("}");
+        return out;
+    }
+
+public:
     std::string strDevIp;
     uint16_t ui16DevPort;
     std::string strUserName;
@@ -68,7 +88,7 @@ public:
         });
     };
 
-    virtual void connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) = 0;
+    virtual bool connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) = 0;
 
     virtual void disconnect(const relustCB& cb) {
     }
@@ -127,7 +147,7 @@ public:
     DeviceHK(unsigned int channel);
     virtual ~DeviceHK();
 
-    void connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
+    bool connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
     void disconnect(const relustCB& cb) override;
 
     void addChannel(int iChnIndex, bool bMainStream = true) override;
@@ -142,7 +162,6 @@ private:
     std::map<int, std::shared_ptr<DevChannel> > m_mapChannels;
     int64_t m_i64LoginId = -1;
     NET_DVR_DEVICEINFO_V30 m_deviceInfo;
-
     reportCB _reportCb;
 };
 
@@ -154,7 +173,7 @@ public:
     DecodeDeviceHK(unsigned int channel);
     virtual ~DecodeDeviceHK();
 
-    void connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
+    bool connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
     void disconnect(const relustCB& cb) override;
 
     void addChannel(int iChnIndex, bool bMainStream = true) override;
@@ -179,7 +198,7 @@ public:
     DecodeToMatDeviceHK(unsigned int channel);
     virtual ~DecodeToMatDeviceHK();
 
-    void connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
+    bool connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
     void disconnect(const relustCB& cb) override;
 
     void addChannel(int iChnIndex, bool bMainStream = true) override;
@@ -207,6 +226,7 @@ public:
     DevChannel() {}
     ~DevChannel() {
         std::cout << ",总共处理帧数:" << m_lFrameCount << std::endl;
+        CONSOLE_COLOR_RESET();
     }
 
 public:
@@ -342,7 +362,7 @@ public:
     ~DeviceInfoHK();
 
 public:
-    void connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
+    bool connectDevice(const connectInfo& info, const connectCB& cb, int iTimeOut = 3) override;
     void disconnect(const relustCB& cb) override;
 
     void addChannel(int iChnIndex, bool bMainStream = true) override;
