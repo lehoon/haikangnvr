@@ -1,5 +1,5 @@
-﻿
-#pragma once
+﻿#ifndef HAIKANG_NVR_WORK_THREAD_H_
+#define HAIKANG_NVR_WORK_THREAD_H_
 
 #include <windows.h>
 #include "IThreadWrap.h"
@@ -27,3 +27,4 @@ private:
 	std::string worker_name_;
 };
 
+#endif //HAIKANG_NVR_WORK_THREAD_H_

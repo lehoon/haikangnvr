@@ -1,0 +1,57 @@
+一、编译安装目录下的config.ini，修改设备信息
+```
+[haikang]
+#ip地址
+device.host=172.17.18.233
+#端口号 
+device.port=8000
+#用户名
+device.username=admin
+#密码
+device.password=Effort@2022
+```
+
+2、双击haikangnvr.exe启动
+
+二、常见用法
+控制台下输入 haikangnvr.exe -h 打印使用帮助
+C:\efforttech\haikangnvr>haikangnvr.exe -h
+usage: haikangnvr.exe [options] ...
+options:
+  -c, --count     测试设备个数, 默认:10 (int [=10])
+  -f, --frame     解码帧间隔, 默认:8帧 (int [=8])
+  -d, --decode    是否启用转码, 默认不转码
+  -m, --mat       是否生成mat对象,依赖转码参数, 默认不生成mat对象
+  -l, --logger    是否记录解码日志, 验证数据使用,默认不打印日志
+  -p, --print     打印设备信息
+  -h, --help      打印使用帮助信息
+
+C:\efforttech\haikangnvr>
+
+haikangnvr.exe  -c 10                     测试接入10路视频流  不解码  不转opencv的mat对象
+haikangnvr.exe  -c 20                     测试接入20路视频流  不解码  不转opencv的mat对象
+
+haikangnvr.exe  -c 10 -d                  测试接入10路视频流  解码  不转opencv的mat对象
+haikangnvr.exe  -c 10 -d  -f24            测试接入10路视频流  24帧解码一次  不转opencv的mat对象
+haikangnvr.exe  -c 10 -d -m               测试接入10路视频流  解码  转opencv的mat对象
+
+haikangnvr.exe  -c 10 -d -m -f24          测试接入10路视频流  24帧解码一次  转opencv的mat对象
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

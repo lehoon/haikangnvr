@@ -8,6 +8,18 @@
 #include <string>
 #include <map>
 
+#define CodecH264 0
+#define CodecH265 1
+
+class VideoInfo {
+public:
+    int iWidth;
+    int iHeight;
+    float iFrameRate;
+    int iBitRate = 2 * 1024 * 1024;
+    int codecId = CodecH264;
+};
+
 class connectInfo {
 public:
     connectInfo(){}
@@ -215,6 +227,25 @@ private:
     NET_DVR_DEVICEINFO_V30 m_deviceInfo;
 };
 
+
+class Channel {
+public:
+    /**
+     * 初始化视频Track
+     * 相当于MultiMediaSourceMuxer::addTrack(VideoTrack::Ptr );
+     * @param info 视频相关信息
+     */
+    bool initVideo(const VideoInfo& info);
+
+    /**
+     * 输入264帧
+     * @param data 264单帧数据指针
+     * @param len 数据指针长度
+     * @param dts 解码时间戳，单位毫秒；等于0时内部会自动生成时间戳
+     * @param pts 播放时间戳，单位毫秒；等于0时内部会赋值为dts
+     */
+    bool inputH264(const char* data, int len, uint64_t dts, uint64_t pts = 0);
+};
 
 /// <summary>
 /// 设备通道  一般是视频播放通道

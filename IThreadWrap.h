@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿#ifndef HAIKANG_NVR_WORK_THREAD_WRAP_H_
+#define HAIKANG_NVR_WORK_THREAD_WRAP_H_
+
 
 #include "Event.h"
 
@@ -37,3 +39,5 @@ public:
 	virtual bool Work() = 0;
 	virtual std::string Name() const = 0;
 };
+
+#endif //HAIKANG_NVR_WORK_THREAD_WRAP_H_

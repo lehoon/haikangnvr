@@ -116,14 +116,14 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\home\develop\github\haikang_sdk\x64\window\net_sdk\include;D:\home\develop\github\haikang_sdk\x64\window\mediaplaycontrol\Include;D:\home\develop\github\cpp-ext\logger\spdlog\include;D:\home\github\cmdline;C:\home\opencv460\build\include;$(ProjectDir)\3rdParty\include\crashpad;$(ProjectDir)\3rdParty\include\crashpad\mini_chromium;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\home\develop\github\haikang_sdk\x64\window\net_sdk\include;D:\home\develop\github\haikang_sdk\x64\window\mediaplaycontrol\Include;D:\home\develop\github\cpp-ext\logger\spdlog\include;D:\home\github\cmdline;C:\home\opencv460\build\include;$(ProjectDir)\3rdParty\include\crashpad;$(ProjectDir)\3rdParty\include\crashpad\mini_chromium;$(ProjectDir)\3rdParty\include\x264;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>Default</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>D:\home\develop\github\haikang_sdk\x64\window\net_sdk\lib;D:\home\develop\github\haikang_sdk\x64\window\mediaplaycontrol\Libs;C:\home\opencv460\build\x64\vc14\lib;$(ProjectDir)\3rdParty\lib;$(ProjectDir)\3rdParty\lib\debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>HCNetSDK.lib;PlayCtrl.lib;opencv_world460d.lib;base.lib;client.lib;common.lib;util.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>HCNetSDK.lib;PlayCtrl.lib;opencv_world460d.lib;base.lib;client.lib;common.lib;util.lib;libx264-164.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -134,7 +134,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\home\develop\github\haikang_sdk\x64\window\net_sdk\include;D:\home\develop\github\haikang_sdk\x64\window\mediaplaycontrol\Include;D:\home\develop\github\cpp-ext\logger\spdlog\include;D:\home\github\cmdline;C:\home\opencv460\build\include;$(ProjectDir)\3rdParty\include\crashpad;$(ProjectDir)\3rdParty\include\crashpad\mini_chromium;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\home\develop\github\haikang_sdk\x64\window\net_sdk\include;D:\home\develop\github\haikang_sdk\x64\window\mediaplaycontrol\Include;D:\home\develop\github\cpp-ext\logger\spdlog\include;D:\home\github\cmdline;C:\home\opencv460\build\include;$(ProjectDir)\3rdParty\include\crashpad;$(ProjectDir)\3rdParty\include\crashpad\mini_chromium;$(ProjectDir)\3rdParty\include\x264;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -142,7 +142,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>D:\home\develop\github\haikang_sdk\x64\window\net_sdk\lib;D:\home\develop\github\haikang_sdk\x64\window\mediaplaycontrol\Libs;C:\home\opencv460\build\x64\vc14\lib;$(ProjectDir)\3rdParty\lib;$(ProjectDir)\3rdParty\lib\release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>HCNetSDK.lib;PlayCtrl.lib;opencv_world460.lib;base.lib;client.lib;common.lib;util.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>HCNetSDK.lib;PlayCtrl.lib;opencv_world460.lib;base.lib;client.lib;common.lib;util.lib;libx264-164.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

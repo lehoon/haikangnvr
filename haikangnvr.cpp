@@ -17,6 +17,14 @@
 #include <iostream>
 #include <signal.h>
 
+#if defined (__cplusplus)
+extern "C" {
+#include "x264.h"
+}
+#else
+#include "x264.h"
+#endif
+
 void InitCrashpad() {
 	using namespace crashpad;
 	std::map<std::string, std::string> annotations;
@@ -55,6 +63,15 @@ void InitCrashpad() {
 
 	return;
 }
+
+#if 0
+int main(int argc, char* argv[]) {
+	x264_param_t x264_param;
+	x264_param_default(&x264_param);
+	std::cout << x264_param.b_cpu_independent << std::endl;
+	return 0;
+}
+#endif
 
 int main(int argc, char* argv[])
 {

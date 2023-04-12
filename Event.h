@@ -1,4 +1,5 @@
-﻿#pragma once
+﻿#ifndef HAIKANG_NVR_BASE_EVENT_H_
+#define HAIKANG_NVR_BASE_EVENT_H_
 
 #include <windows.h>
 
@@ -22,3 +23,5 @@ namespace base {
     };
 
 }
+
+#endif //HAIKANG_NVR_BASE_EVENT_H_

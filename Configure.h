@@ -1,4 +1,5 @@
-﻿#pragma once
+﻿#ifndef HAIKANG_NVR_CONFIG_CONFIGURE_H_
+#define HAIKANG_NVR_CONFIG_CONFIGURE_H_
 
 #include <string>
 #include <map>
@@ -34,4 +35,6 @@ public:
 private:
 	std::map<std::string, std::map<std::string, std::string> > items_;
 };
+
+#endif //HAIKANG_NVR_CONFIG_CONFIGURE_H_
 

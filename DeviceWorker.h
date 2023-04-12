@@ -1,4 +1,5 @@
-#pragma once
+#ifndef HAIKANG_NVR_DEVICE_WORKER_H_
+#define HAIKANG_NVR_DEVICE_WORKER_H_
 
 #include "common_define.h"
 #include "IThreadWrap.h"
@@ -28,4 +29,6 @@ protected:
 	connectInfo connectInfo_;
 	DeviceHK::Ptr deviceHkPtr;
 };
+
+#endif //HAIKANG_NVR_DEVICE_WORKER_H_
 
