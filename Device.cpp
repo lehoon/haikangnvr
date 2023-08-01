@@ -711,8 +711,7 @@ void DevChannelHK::onPreview(DWORD dwDataType, BYTE* pBuffer, DWORD dwBufSize) {
                 std::cout << "模拟视频通道" << m_channel << "拉取视频失败, errocde:" << errcode << ",message:" << NET_DVR_GetErrorMsg((LONG*)&errcode) << std::endl;
                 break;
             }
-            if (!PlayM4_OpenStream(m_iPlayHandle, pBuffer, dwBufSize,
-                1024 * 1024)) {  //打开流接口
+            if (!PlayM4_OpenStream(m_iPlayHandle, pBuffer, dwBufSize, 1024 * 1024)) {  //打开流接口
                 CONSOLE_COLOR_ERROR();
                 DWORD errcode = NET_DVR_GetLastError();
                 SPDLOG_ERROR("模拟视频通道[{}]拉取视频失败, errocde:", m_channel, errcode);
